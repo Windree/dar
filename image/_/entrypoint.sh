@@ -47,16 +47,16 @@ function test() {
     fi
 }
 
-function restore() {
+function extract() {
     local data=/data
-    local data=/target
-    local archives=$(get_archives "$data")
-    local count=$(cat "$archives" | wc -l)
+    local target=/target
+    local archives=$(get_archives "$data" | tail -n 1)
+    # local count=$(echo "$archives" | wc -l)
     local index=0
     while IFS="" read -r dar || [ -n "$dar" ]; do
         index=$((index + 1))
         echo "$index/$count: Unpacking '$dar'"
-        if ! dar --extract "$dar" --fs-root="$data" -Q --verbose=treated "$@"; then
+        if ! dar --extract "$data/$dar" --fs-root="$target" -Q --no-warn=all --verbose=treated "$@"; then
             echo "$index/$count: Failed to unpacking '$dar'"
             exit 1
         fi
@@ -81,8 +81,8 @@ case "$action" in
 "test")
     test "$@"
     ;;
-"restore")
-    restore "$@"
+"extract")
+    extract "$@"
     ;;
 *)
     echo "Unsupported action '$1'"
