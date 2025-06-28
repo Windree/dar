@@ -50,17 +50,17 @@ function test() {
 function extract() {
     local data=/data
     local target=/target
-    local archives=$(get_archives "$data" | tail -n 1)
-    # local count=$(echo "$archives" | wc -l)
+    local archives="$(get_archives "$data")"
+    local count=$(echo "$archives" | wc -l)
     local index=0
     while IFS="" read -r dar || [ -n "$dar" ]; do
         index=$((index + 1))
         echo "$index/$count: Unpacking '$dar'"
-        if ! dar --extract "$data/$dar" --fs-root="$target" -Q --no-warn=all --verbose=treated "$@"; then
+        if ! dar -x "$data/$dar" "$@" --fs-root="$target" -Q --no-warn=all --verbose=treated; then
             echo "$index/$count: Failed to unpacking '$dar'"
             exit 1
         fi
-    done <<<"$archives"
+    done <<< "$archives"
 }
 
 function get_archives() {
