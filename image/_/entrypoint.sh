@@ -2,65 +2,74 @@
 set -Eeuo pipefail
 
 function create() {
-    local source=/source
-    local target=/data
-    local temp=$target/$1
+    local source="/source"
+    local target="/data"
+    local temp="$target/$1"
     shift
+    
     mkdir -p "$temp"
+    
     local last_dar=$(find "$target" -maxdepth 1 -type f -name "*.*.dar" -printf '%T@\t%p\n' | sort -n | tail -1 | cut -f2-)
-    local last_archive=${last_dar%.*.*}
-    if [ -z "$last_archive" ]; then
-        local name=full
-        echo "Creating an archive '$name'."
+    
+    if [ -z "$last_dar" ]; then
+        local name="full"
+        echo "Creating an archive: '$name'"
         if ! dar --create "$temp/$name" --fs-root "$source" -Q --no-overwrite --compress=zstd "$@" 1>/dev/null; then
-            echo "Faled to create an archive"
+            echo "Failed to create an archive: '$name'"
             exit 1
         fi
     else
-        local name=incremental-$(date +%Y%m%d-%H%M%S)
-        echo "Creating an incremental archive '$name'."
-        if ! dar --create "$temp/$name" --ref "$last_archive" --fs-root "$source" -Q --no-overwrite --compress=zstd "$@" 1>/dev/null; then
-            echo "Faled to create an incremental archive"
+        local last_ref="${last_dar%.*.*}"
+        local name="incremental-$(date +%Y%m%d-%H%M%S)"
+        echo "Creating an incremental archive '$name' based on '$last_ref'."
+        if ! dar --create "$temp/$name" --ref "$last_ref" --fs-root "$source" -Q --no-overwrite --compress=zstd "$@" 1>/dev/null; then
+            echo "Failed to create an incremental archive"
             exit 1
         fi
     fi
-    local size=$(du --total --bytes "$temp" | tail -n 1 | cut -f 1 | numfmt --grouping)
-    local count=$(find "$temp" -type f | wc -l | numfmt --grouping)
+    
+    local size=$(du --total --bytes "$temp" | tail -n 1 | cut -f 1)
+    local count=$(find "$temp" -type f | wc -l)
     echo "Size: $size bytes."
     echo "Files: $count."
 }
 
-function test() {
-    local data=/data
-    local files_count=0
-    while IFS="" read -r dar || [ -n "$dar" ]; do
-        echo "Testing '$dar'"
-        files_count=$((files_count + 1))
-        if ! dar --test "$data/$dar" -Q "$@"; then
-            echo "Test failed!"
+function verify() {
+    local data="/data"
+    local index=0
+    local total=$(get_archives "$data" | wc -l)
+    
+    if [ $total -eq 0 ]; then
+        echo "Failed to find files to verify!"
+        exit 2
+    fi
+
+    while IFS="" read -r archive_basename || [ -n "$archive_basename" ]; do
+        index=$((index + 1))
+        
+        echo "[$index/$total] Verification of the file: $archive_basename"
+        if ! dar --test "$data/$archive_basename" -Q --quiet "$@"; then
+            echo "[$index/$total] The file verification failed: '$archive_basename'!"
             exit 1
         fi
     done < <(get_archives "$data")
-    if [ $files_count -eq 0 ]; then
-        echo "Failed to find files to test!"
-        exit 2
-    fi
 }
 
 function extract() {
-    local data=/data
-    local target=/target
+    local data="/data"
+    local target="/target"
     local archives="$(get_archives "$data")"
-    local count=$(echo "$archives" | wc -l)
+    local count=$(get_archives "$data" | wc -l)
     local index=0
-    while IFS="" read -r dar || [ -n "$dar" ]; do
+    
+    while IFS="" read -r archive_basename || [ -n "$archive_basename" ]; do
         index=$((index + 1))
-        echo "$index/$count: Unpacking '$dar'"
-        if ! dar -x "$data/$dar" "$@" --fs-root="$target" -Q --no-warn=all --verbose=treated; then
-            echo "$index/$count: Failed to unpacking '$dar'"
+        echo "[$index/$count] Restoring an archive: '$archive_basename'"
+        if ! dar -x "$data/$archive_basename" "$@" --fs-root="$target" -Q --quiet -w -ae; then
+            echo "[$index/$count] Failed restore: '$archive_basename'"
             exit 1
         fi
-    done <<< "$archives"
+    done < <(get_archives "$data")
 }
 
 function get_archives() {
@@ -68,25 +77,19 @@ function get_archives() {
 }
 
 if [ $# -lt 1 ]; then
-    echo "At least 1 arguments required. create or test"
-    exit -1
+    echo "Usage: $0 {create|extract|verify} [args]"
+    exit 1
 fi
 
 action=$1
 shift
 case "$action" in
-"create")
-    create "$@"
-    ;;
-"test")
-    test "$@"
-    ;;
-"extract")
-    extract "$@"
-    ;;
-*)
-    echo "Unsupported action '$1'"
-    exit -2
-    ;;
+    "create") create "$@" ;;
+    "extract") extract "$@" ;;
+    "verify") verify "$@" ;;
 
+    *)
+        echo "Unsupported action '$action'"
+        exit 1
+        ;;
 esac
